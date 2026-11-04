@@ -54,9 +54,6 @@ bank_statement_system/
 │   └── training_corpus.csv                # 3,160 labeled financial transaction samples
 ├── models/
 │   └── traditional_ml_classifier.pkl      # Persisted Dual-Head TF-IDF + NB/LogReg model
-├── sample_data/
-│   ├── pdfs/                              # Sample benchmark statement files (Text & Scanned)
-│   └── outputs/                           # Generated CSV, Excel, and JSON audit artifacts
 ├── src/
 │   ├── pipeline.py                        # End-to-end BankStatementPipeline orchestrator
 │   ├── ingestion/
