@@ -1,0 +1,25 @@
+# Core PDF Reading & Extraction
+pypdf>=5.0.0
+pdfplumber>=0.11.0
+pypdfium2>=4.30.0
+
+# Computer Vision & OCR Engines (Dual OCR Pipeline: RapidOCR + Tesseract fallback)
+opencv-python>=4.10.0
+pytesseract>=0.3.10
+rapidocr-onnxruntime>=1.2.0
+
+# Non-LLM Machine Learning & Statistical NLP
+scikit-learn>=1.5.0
+pandas>=2.2.0
+numpy>=2.0.0
+
+# Multi-Sheet Excel & Ledger Exports
+openpyxl>=3.1.0
+
+# API & Web Server
+fastapi>=0.115.0
+uvicorn>=0.30.0
+python-multipart>=0.0.12
+
+# Testing & Verification
+pytest>=8.0.0
