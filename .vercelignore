@@ -1,0 +1,22 @@
+# Vercel deployment ignore file
+# Prevents Vercel from treating this repository as a Python backend project
+# Deploys as a fast, high-performance static web application
+
+requirements.txt
+main.py
+api.py
+src/
+models/
+data/
+tests/
+notebooks/
+scratch/
+output/
+sample_data/
+OCR_TEST/
+*.py
+*.pkl
+*.csv
+*.xlsx
+__pycache__/
+.pytest_cache/

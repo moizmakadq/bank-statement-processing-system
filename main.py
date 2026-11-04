@@ -14,6 +14,17 @@ from src.utils.sample_pdf_generator import generate_all_sample_pdfs
 
 logger = logging.getLogger(__name__)
 
+# ASGI / FastAPI application instance for Vercel / serverless auto-detection
+try:
+    from api import app
+except Exception:
+    try:
+        from fastapi import FastAPI
+        app = FastAPI(title="Bank Statement Processing System")
+    except Exception:
+        app = None
+
+
 
 def run_benchmark_and_export(base_dir: str, final_output_dir: str) -> dict:
     """Generates training corpus & sample statements, runs full pipeline, evaluates ML (80/20 + 5-fold CV), and exports CSV/Excel."""
