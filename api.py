@@ -73,10 +73,12 @@ def _get_ml_evaluation() -> dict:
 
 @app.get("/")
 def serve_index():
-    index_path = os.path.join(BASE_DIR, "Bank_Statement_Processing_System.html")
+    index_path = os.path.join(BASE_DIR, "index.html")
+    if not os.path.exists(index_path):
+        index_path = os.path.join(BASE_DIR, "Bank_Statement_Processing_System.html")
     if os.path.exists(index_path):
         return FileResponse(index_path, media_type="text/html")
-    raise HTTPException(status_code=404, detail="Bank_Statement_Processing_System.html not found")
+    raise HTTPException(status_code=404, detail="index.html not found")
 
 
 @app.get("/api/demo-bundle")

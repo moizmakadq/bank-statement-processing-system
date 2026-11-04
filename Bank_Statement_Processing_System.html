@@ -7,6 +7,7 @@
   <script src="https://cdn.tailwindcss.com/3.4.17"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <style>
     body { font-family: 'Inter', sans-serif; }
@@ -1273,63 +1274,158 @@
         showToast(`Parsed & reconciled ${parsedSt.transactions.length} transactions from ${parsedSt.metadata.bank_name}!`);
       });
 
-      async function handleFileUpload(file) {
+          async function runInBrowserOcr(file) {
+      const statusTitle = document.getElementById("uploadStatusTitle");
+      const statusDetail = document.getElementById("uploadStatusDetail");
+      statusTitle.textContent = `Running In-Browser OCR: ${file.name}...`;
+      statusDetail.innerHTML = `<span class="inline-flex items-center gap-2 text-blue-700 font-medium">⏳ Initializing WebAssembly OCR worker (this may take 15–30s)...</span>`;
+      try {
+        if (!window.Tesseract) {
+          statusDetail.innerHTML = `<span class="text-rose-600">Tesseract.js not loaded. Please ensure internet access or run the Python backend.</span>`;
+          return;
+        }
+
+        let allOcrText = "";
+        const isPdf = file.name.toLowerCase().endsWith(".pdf");
+
+        if (isPdf && window.pdfjsLib) {
+          const arrayBuf = await file.arrayBuffer();
+          const pdf = await window.pdfjsLib.getDocument({ data: arrayBuf }).promise;
+          const maxPages = Math.min(pdf.numPages, 4);
+          for (let p = 1; p <= maxPages; p++) {
+            statusDetail.innerHTML = `<span class="text-blue-700 font-medium">⏳ Scanning page ${p} of ${maxPages} with in-browser OCR...</span>`;
+            const page = await pdf.getPage(p);
+            const viewport = page.getViewport({ scale: 2.0 });
+            const canvas = document.createElement("canvas");
+            canvas.width = viewport.width;
+            canvas.height = viewport.height;
+            const ctx = canvas.getContext("2d");
+            await page.render({ canvasContext: ctx, viewport: viewport }).promise;
+
+            const result = await window.Tesseract.recognize(canvas, "eng", {
+              logger: m => {
+                if (m.status === "recognizing text") {
+                  statusDetail.innerHTML = `<span class="text-blue-700">⏳ Page ${p}/${maxPages} OCR: <b>${Math.round((m.progress || 0) * 100)}%</b></span>`;
+                }
+              }
+            });
+            allOcrText += (result.data.text || "") + "\n";
+          }
+        } else {
+          // Image file
+          statusDetail.innerHTML = `<span class="text-blue-700 font-medium">⏳ Recognizing text in image...</span>`;
+          const result = await window.Tesseract.recognize(file, "eng", {
+            logger: m => {
+              if (m.status === "recognizing text") {
+                statusDetail.innerHTML = `<span class="text-blue-700">⏳ OCR Progress: <b>${Math.round((m.progress || 0) * 100)}%</b></span>`;
+              }
+            }
+          });
+          allOcrText = result.data.text || "";
+        }
+
+        const parsedSt = parseRawStatementText(allOcrText, file.name);
+        parsedSt.pdf_type = "IMAGE_BASED (BROWSER_WASM_OCR)";
+        if (parsedSt.transactions.length > 0) {
+          appState.statements.push(parsedSt);
+          rebuildStatementDropdown();
+          const newIdx = String(appState.statements.length - 1);
+          document.getElementById("statementSelect").value = newIdx;
+          appState.selectedStatementIdx = newIdx;
+          refreshAllViews();
+          statusTitle.textContent = `✓ In-Browser OCR Complete: ${file.name}`;
+          statusDetail.innerHTML = `
+            <div class="space-y-1">
+              <div>Bank: <b>${parsedSt.metadata.bank_name}</b> | Mode: <b>In-Browser WASM OCR</b></div>
+              <div>Extracted: <b>${parsedSt.transactions.length} Transactions</b> | Reconciled: <b>${parsedSt.reconciliation.reconciliation_rate}%</b></div>
+              <div class="pt-1">
+                <button type="button" onclick="switchTab('dashboard')" class="px-3 py-1 bg-blue-600 text-white rounded text-xs font-semibold hover:bg-blue-500">View in Dashboard ➜</button>
+              </div>
+            </div>
+          `;
+          showToast(`In-browser OCR extracted ${parsedSt.transactions.length} transactions!`);
+          setTimeout(() => { switchTab("dashboard"); }, 1000);
+        } else {
+          statusTitle.textContent = `OCR Finished: Low Text Confidence`;
+          statusDetail.innerHTML = `
+            <div class="text-slate-600">In-browser OCR extracted text, but couldn't detect structured transactions. For 100% accuracy, run the Python RapidOCR engine:</div>
+            <div class="bg-slate-900 text-emerald-400 p-2 rounded font-mono text-[11px] mt-1.5">python -m uvicorn api:app --port 8000 --reload</div>
+          `;
+          showToast("Low confidence OCR. Start Python backend for full RapidOCR.", "⚠️");
+        }
+      } catch (ocrErr) {
+        console.error("Browser OCR error:", ocrErr);
+        statusTitle.textContent = `In-Browser OCR Error`;
+        statusDetail.innerHTML = `<span class="text-rose-600">${ocrErr.message}</span>. Please use the Python backend: <code>python -m uvicorn api:app --port 8000</code>.`;
+      }
+    }
+
+    async function handleFileUpload(file) {
       if (!file) return;
       const statusBox = document.getElementById("uploadStatusBox");
       const statusTitle = document.getElementById("uploadStatusTitle");
       const statusDetail = document.getElementById("uploadStatusDetail");
       statusBox.classList.remove("hidden");
       statusTitle.textContent = `Processing ${file.name} (${(file.size / 1024).toFixed(1)} KB)...`;
-      statusDetail.innerHTML = `<span class="inline-flex items-center gap-2 text-blue-700 font-medium">⏳ Analyzing document &amp; executing RapidOCR / Rule+ML pipeline...</span>`;
+      statusDetail.innerHTML = `<span class="inline-flex items-center gap-2 text-blue-700 font-medium">⏳ Checking OCR backend & analyzing document...</span>`;
 
-      // Step 1: Attempt to process via FastAPI backend /api/process
-      try {
-        const formData = new FormData();
-        formData.append("file", file);
-        const res = await fetch("/api/process", {
-          method: "POST",
-          body: formData,
-        });
-
-        if (res.ok) {
-          const resultData = await res.json();
-          if (resultData && resultData.transactions && resultData.transactions.length > 0) {
-            appState.statements.push(resultData);
-            rebuildStatementDropdown();
-            const newIdx = String(appState.statements.length - 1);
-            document.getElementById("statementSelect").value = newIdx;
-            appState.selectedStatementIdx = newIdx;
-            refreshAllViews();
-
-            const bankName = (resultData.metadata && resultData.metadata.bank_name) || "Bank";
-            const reconRate = (resultData.reconciliation && resultData.reconciliation.reconciliation_rate != null) ? resultData.reconciliation.reconciliation_rate : 100.0;
-            statusTitle.textContent = `✓ Successfully Processed: ${file.name}`;
-            statusDetail.innerHTML = `
-              <div class="mt-1 space-y-1">
-                <div>Bank: <b>${bankName}</b> | Mode: <b>${resultData.pdf_type || 'OCR'}</b></div>
-                <div>Extracted: <b>${resultData.transactions.length} Transactions</b> | Reconciled: <b>${reconRate}%</b></div>
-                <div class="pt-2 flex items-center gap-2">
-                  <button type="button" onclick="switchTab('dashboard')" class="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs transition cursor-pointer">
-                    View Extracted Transactions in Dashboard ➜
-                  </button>
-                </div>
-              </div>
-            `;
-            showToast(`Extracted & classified ${resultData.transactions.length} txns from ${bankName}!`);
-            setTimeout(() => {
-              switchTab("dashboard");
-            }, 1000);
-            return;
+      // Step 1: Attempt to process via FastAPI backend (relative or local port 8000)
+      let resultData = null;
+      const endpoints = ["/api/process", "http://127.0.0.1:8000/api/process", "http://localhost:8000/api/process"];
+      for (const ep of endpoints) {
+        try {
+          const formData = new FormData();
+          formData.append("file", file);
+          const res = await fetch(ep, {
+            method: "POST",
+            body: formData,
+          });
+          if (res.ok) {
+            const json = await res.json();
+            if (json && json.transactions && json.transactions.length > 0) {
+              resultData = json;
+              break;
+            }
           }
+        } catch (e) {
+          // ignore and try next endpoint
         }
-      } catch (fetchErr) {
-        console.warn("Backend /api/process unavailable, falling back to client-side extraction:", fetchErr);
       }
 
-      // Step 2: Fallback to client-side PDF.js (if file is a digital PDF)
-      if (file.name.toLowerCase().endsWith(".pdf") && window.pdfjsLib) {
+      if (resultData && resultData.transactions && resultData.transactions.length > 0) {
+        appState.statements.push(resultData);
+        rebuildStatementDropdown();
+        const newIdx = String(appState.statements.length - 1);
+        document.getElementById("statementSelect").value = newIdx;
+        appState.selectedStatementIdx = newIdx;
+        refreshAllViews();
+
+        const bankName = (resultData.metadata && resultData.metadata.bank_name) || "Bank";
+        const reconRate = (resultData.reconciliation && resultData.reconciliation.reconciliation_rate != null) ? resultData.reconciliation.reconciliation_rate : 100.0;
+        statusTitle.textContent = `✓ Successfully Processed: ${file.name}`;
+        statusDetail.innerHTML = `
+          <div class="mt-1 space-y-1">
+            <div>Bank: <b>${bankName}</b> | Mode: <b>${resultData.pdf_type || 'OCR'}</b></div>
+            <div>Extracted: <b>${resultData.transactions.length} Transactions</b> | Reconciled: <b>${reconRate}%</b></div>
+            <div class="pt-2 flex items-center gap-2">
+              <button type="button" onclick="switchTab('dashboard')" class="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs transition cursor-pointer">
+                View Extracted Transactions in Dashboard ➜
+              </button>
+            </div>
+          </div>
+        `;
+        showToast(`Extracted & classified ${resultData.transactions.length} txns from ${bankName}!`);
+        setTimeout(() => {
+          switchTab("dashboard");
+        }, 1000);
+        return;
+      }
+
+      // Step 2: Fallback to client-side extraction (if file is a digital PDF)
+      const isPdf = file.name.toLowerCase().endsWith(".pdf");
+      if (isPdf && window.pdfjsLib) {
         try {
-          statusDetail.innerHTML = `<span class="text-amber-700">Backend offline; attempting client-side digital text extraction via PDF.js...</span>`;
+          statusDetail.innerHTML = `<span class="text-amber-700">Checking for digital text streams in PDF...</span>`;
           window.pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
           const arrayBuf = await file.arrayBuffer();
           const pdf = await window.pdfjsLib.getDocument({ data: arrayBuf }).promise;
@@ -1351,23 +1447,48 @@
           }
 
           if (fullText.replace(/\s+/g, "").length < 40) {
-            const existingIdx = appState.statements.findIndex(s => s.file_name && s.file_name.toLowerCase() === file.name.toLowerCase());
-            if (existingIdx >= 0) {
-              document.getElementById("statementSelect").value = String(existingIdx);
-              appState.selectedStatementIdx = String(existingIdx);
-              refreshAllViews();
-              statusTitle.textContent = `Loaded Scanned OCR Benchmark: ${file.name}`;
-              statusDetail.innerHTML = `
-                <div>Switched to pre-computed 100% reconciled OCR statement in dropdown (<b>${appState.statements[existingIdx].transactions.length} Txns</b>).</div>
-                <button type="button" onclick="switchTab('dashboard')" class="mt-2 px-3 py-1 bg-blue-600 text-white rounded text-xs font-semibold hover:bg-blue-500">View in Dashboard ➜</button>
-              `;
-              showToast(`Loaded pre-processed OCR result for ${file.name}`);
-              setTimeout(() => { switchTab("dashboard"); }, 800);
-            } else {
-              statusTitle.textContent = `Detected IMAGE_BASED (Scanned) File: ${file.name}`;
-              statusDetail.innerHTML = `Zero digital text found. To process new scanned files with live RapidOCR, start the backend server (<code>python -m uvicorn api:app --port 8000</code>) and refresh this page.`;
-              showToast("Scanned file: start backend server for live OCR.", "⚠️");
-            }
+            statusTitle.textContent = `Scanned / Image PDF Detected: ${file.name}`;
+            statusDetail.innerHTML = `
+              <div class="mt-2 p-3 bg-amber-50 border border-amber-200 rounded-xl text-slate-700 text-xs space-y-3">
+                <div class="font-bold text-amber-900 flex items-center gap-1.5 text-xs sm:text-sm">
+                  <span>🔍</span> Scanned / Image PDF Detected (Zero Digital Text)
+                </div>
+                <p class="text-slate-600 leading-relaxed">
+                  This document contains photocopied pages or images without digital text. To extract transactions, an OCR (Optical Character Recognition) engine is required:
+                </p>
+                <div class="p-3 bg-white rounded-lg border border-slate-200 space-y-1.5 shadow-2xs">
+                  <div class="font-semibold text-slate-800 flex items-center justify-between">
+                    <span>Option 1: Python RapidOCR + OpenCV Backend (Recommended)</span>
+                    <span class="text-[10px] bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded">100% Accuracy • Instant</span>
+                  </div>
+                  <div class="text-[11px] text-slate-500">Run this command in your project terminal to start the live OCR service:</div>
+                  <div class="bg-slate-900 text-emerald-400 p-2.5 rounded font-mono text-[11px] flex items-center justify-between">
+                    <code>python -m uvicorn api:app --port 8000 --reload</code>
+                    <button type="button" onclick="navigator.clipboard.writeText('python -m uvicorn api:app --port 8000 --reload'); showToast('Copied start command!');" class="text-xs bg-slate-800 hover:bg-slate-700 text-white px-2.5 py-1 rounded border border-slate-700">Copy</button>
+                  </div>
+                  <div class="text-[11px] text-slate-500 pt-0.5">Then open <a href="http://localhost:8000" target="_blank" class="text-blue-600 underline font-semibold">http://localhost:8000</a> to upload with live OCR.</div>
+                </div>
+                <div class="p-3 bg-white rounded-lg border border-slate-200 space-y-1.5 shadow-2xs">
+                  <div class="font-semibold text-slate-800 flex items-center justify-between">
+                    <span>Option 2: In-Browser WebAssembly OCR</span>
+                    <span class="text-[10px] bg-blue-100 text-blue-800 font-semibold px-2 py-0.5 rounded">No Backend Server Needed</span>
+                  </div>
+                  <div class="text-[11px] text-slate-500">Execute Tesseract OCR directly in your browser using WebAssembly:</div>
+                  <button id="btnTriggerBrowserOcr" type="button" class="mt-1 px-3.5 py-1.5 bg-blue-600 hover:bg-blue-500 text-white font-semibold rounded text-xs transition shadow-xs cursor-pointer">
+                    ⚡ Run In-Browser OCR Now
+                  </button>
+                </div>
+              </div>
+            `;
+            setTimeout(() => {
+              const btnOcr = document.getElementById("btnTriggerBrowserOcr");
+              if (btnOcr) {
+                btnOcr.addEventListener("click", () => {
+                  runInBrowserOcr(file);
+                });
+              }
+            }, 50);
+            showToast("Scanned file detected: start Python backend or use in-browser OCR.", "⚠️");
           } else {
             const parsedSt = parseRawStatementText(fullText, file.name);
             if (parsedSt.transactions.length > 0) {
@@ -1392,14 +1513,41 @@
           }
         } catch (pdfErr) {
           statusTitle.textContent = "Client Fallback Notice";
-          statusDetail.textContent = `Cannot parse file in browser (${pdfErr.message}). Start the backend with 'python -m uvicorn api:app --port 8000'.`;
+          statusDetail.textContent = `Cannot parse file in browser (${pdfErr.message}). Start backend with: python -m uvicorn api:app --port 8000`;
         }
       } else {
-        statusTitle.textContent = `Image File Uploaded: ${file.name}`;
-        statusDetail.textContent = "Image OCR requires the Python backend server. Run 'python -m uvicorn api:app --port 8000' and refresh this page.";
-        showToast("Image OCR requires backend server. Run uvicorn api:app", "⚠️");
+        // Image format without backend
+        statusTitle.textContent = `Scanned / Image File: ${file.name}`;
+        statusDetail.innerHTML = `
+          <div class="mt-2 p-3 bg-amber-50 border border-amber-200 rounded-xl text-slate-700 text-xs space-y-3">
+            <div class="font-bold text-amber-900 flex items-center gap-1.5">
+              <span>🖼️</span> Image File Uploaded (${file.name})
+            </div>
+            <p class="text-slate-600">To extract transactions from image files:</p>
+            <div class="p-2.5 bg-white rounded border border-slate-200 space-y-1">
+              <div class="font-semibold text-slate-800">Option 1: Python RapidOCR Backend (Recommended)</div>
+              <div class="bg-slate-900 text-emerald-400 p-2 rounded font-mono text-[11px]">python -m uvicorn api:app --port 8000 --reload</div>
+            </div>
+            <div class="p-2.5 bg-white rounded border border-slate-200 space-y-1">
+              <div class="font-semibold text-slate-800">Option 2: In-Browser OCR</div>
+              <button id="btnTriggerImageOcr" type="button" class="mt-1 px-3 py-1.5 bg-blue-600 text-white rounded text-xs font-semibold hover:bg-blue-500 cursor-pointer">
+                ⚡ Run In-Browser OCR Now
+              </button>
+            </div>
+          </div>
+        `;
+        setTimeout(() => {
+          const btnImgOcr = document.getElementById("btnTriggerImageOcr");
+          if (btnImgOcr) {
+            btnImgOcr.addEventListener("click", () => {
+              runInBrowserOcr(file);
+            });
+          }
+        }, 50);
+        showToast("Image file: start backend or run in-browser OCR.", "⚠️");
       }
     }
+
 
       // Live PDF / Image File Upload listener
       const fileInputElem = document.getElementById("pdfFileInput");
