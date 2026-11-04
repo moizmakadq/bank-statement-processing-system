@@ -20,3 +20,4 @@ OCR_TEST/
 *.xlsx
 __pycache__/
 .pytest_cache/
+
