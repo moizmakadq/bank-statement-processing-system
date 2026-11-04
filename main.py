@@ -14,15 +14,9 @@ from src.utils.sample_pdf_generator import generate_all_sample_pdfs
 
 logger = logging.getLogger(__name__)
 
-# ASGI / FastAPI application instance for Vercel / serverless auto-detection
-try:
-    from api import app
-except Exception:
-    try:
-        from fastapi import FastAPI
-        app = FastAPI(title="Bank Statement Processing System")
-    except Exception:
-        app = None
+# ASGI / FastAPI top-level application instance for Vercel / serverless scanners
+from fastapi import FastAPI
+app = FastAPI(title="Bank Statement Processing System")
 
 
 
