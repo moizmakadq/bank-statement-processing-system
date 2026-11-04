@@ -58,9 +58,6 @@
         <button type="button" data-tab="upload" class="nav-tab px-3.5 py-2 rounded-lg text-xs sm:text-sm font-medium text-slate-600 hover:bg-slate-100 transition">
           2. Upload PDF / Live Parser
         </button>
-        <button type="button" data-tab="audit" class="nav-tab px-3.5 py-2 rounded-lg text-xs sm:text-sm font-medium text-slate-600 hover:bg-slate-100 transition">
-          3. Reconciliation &amp; Architecture
-        </button>
       </nav>
 
       <div class="flex items-center gap-2">
@@ -313,105 +310,6 @@
       </div>
     </section>
 
-    <!-- TAB 3: RECONCILIATION AUDIT & SYSTEM ARCHITECTURE -->
-    <section id="tab-audit" class="hidden space-y-6">
-      <div class="bg-white rounded-xl border border-slate-200 p-5 shadow-xs space-y-4">
-        <h2 class="text-base font-bold text-slate-900">Multi-Bank Benchmark &amp; Balance Reconciliation Audit</h2>
-        <p class="text-xs text-slate-600">
-          Every processed PDF statement is verified against the strict accounting identity: <code>Opening Balance + Total Credits - Total Debits = Closing Balance</code>.
-        </p>
-        <div class="overflow-x-auto">
-          <table class="w-full text-left border-collapse text-xs">
-            <thead class="bg-slate-100 text-slate-700 border-b border-slate-200">
-              <tr>
-                <th class="py-2.5 px-3">Statement File</th>
-                <th class="py-2.5 px-3">Detected PDF Type</th>
-                <th class="py-2.5 px-3">Bank &amp; IFSC</th>
-                <th class="py-2.5 px-3">Account Holder</th>
-                <th class="py-2.5 px-3 text-right">Opening Bal (₹)</th>
-                <th class="py-2.5 px-3 text-right">Total Debits (₹)</th>
-                <th class="py-2.5 px-3 text-right">Total Credits (₹)</th>
-                <th class="py-2.5 px-3 text-right">Closing Bal (₹)</th>
-                <th class="py-2.5 px-3 text-center">Reconciled</th>
-                <th class="py-2.5 px-3">Edge Cases Handled</th>
-              </tr>
-            </thead>
-            <tbody class="divide-y divide-slate-200">
-              <tr>
-                <td class="py-2.5 px-3 font-semibold">HDFC_Bank_Text_Statement_Oct2026.pdf</td>
-                <td class="py-2.5 px-3"><span class="px-2 py-0.5 rounded bg-blue-50 text-blue-700 font-semibold">TEXT_BASED</span></td>
-                <td class="py-2.5 px-3">HDFC Bank (HDFC0000240)</td>
-                <td class="py-2.5 px-3">AARAV MEHTA</td>
-                <td class="py-2.5 px-3 text-right">145,000.00</td>
-                <td class="py-2.5 px-3 text-right text-rose-600">122,464.70</td>
-                <td class="py-2.5 px-3 text-right text-emerald-600">99,905.00</td>
-                <td class="py-2.5 px-3 text-right font-bold">122,440.30</td>
-                <td class="py-2.5 px-3 text-center"><span class="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 font-bold">20/20 (100%)</span></td>
-                <td class="py-2.5 px-3">High-value salary credit, dual Debit/Credit columns</td>
-              </tr>
-              <tr>
-                <td class="py-2.5 px-3 font-semibold">ICICI_Bank_Text_Statement_Oct2026.pdf</td>
-                <td class="py-2.5 px-3"><span class="px-2 py-0.5 rounded bg-blue-50 text-blue-700 font-semibold">TEXT_BASED</span></td>
-                <td class="py-2.5 px-3">ICICI Bank (ICIC0000104)</td>
-                <td class="py-2.5 px-3">ROHAN KULKARNI</td>
-                <td class="py-2.5 px-3 text-right">82,000.00</td>
-                <td class="py-2.5 px-3 text-right text-rose-600">68,196.00</td>
-                <td class="py-2.5 px-3 text-right text-emerald-600">104,299.00</td>
-                <td class="py-2.5 px-3 text-right font-bold">118,103.00</td>
-                <td class="py-2.5 px-3 text-center"><span class="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 font-bold">14/14 (100%)</span></td>
-                <td class="py-2.5 px-3">Single Amount column (Dr/Cr), 1 Duplicate charge, 1 Reversal</td>
-              </tr>
-              <tr>
-                <td class="py-2.5 px-3 font-semibold">SBI_Scanned_Image_Statement_Oct2026.pdf</td>
-                <td class="py-2.5 px-3"><span class="px-2 py-0.5 rounded bg-purple-50 text-purple-700 font-semibold">IMAGE_BASED (OCR)</span></td>
-                <td class="py-2.5 px-3">State Bank of India (SBIN0004120)</td>
-                <td class="py-2.5 px-3">PRIYA NAIR</td>
-                <td class="py-2.5 px-3 text-right">64,500.00</td>
-                <td class="py-2.5 px-3 text-right text-rose-600">47,810.00</td>
-                <td class="py-2.5 px-3 text-right text-emerald-600">72,000.00</td>
-                <td class="py-2.5 px-3 text-right font-bold">88,690.00</td>
-                <td class="py-2.5 px-3 text-center"><span class="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 font-bold">12/12 (100%)</span></td>
-                <td class="py-2.5 px-3">300 DPI Scanned Image, 0.75° OpenCV deskew, 93.4% OCR conf</td>
-              </tr>
-              <tr>
-                <td class="py-2.5 px-3 font-semibold">AU_100_transactions_scanned.pdf</td>
-                <td class="py-2.5 px-3"><span class="px-2 py-0.5 rounded bg-purple-50 text-purple-700 font-semibold">IMAGE_BASED (OCR)</span></td>
-                <td class="py-2.5 px-3">Southern Cross Test Bank</td>
-                <td class="py-2.5 px-3">Taylor Morgan</td>
-                <td class="py-2.5 px-3 text-right">4,250.75</td>
-                <td class="py-2.5 px-3 text-right text-rose-600">10,140.54</td>
-                <td class="py-2.5 px-3 text-right text-emerald-600">18,952.10</td>
-                <td class="py-2.5 px-3 text-right font-bold">13,062.31</td>
-                <td class="py-2.5 px-3 text-center"><span class="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 font-bold">100/100 (100%)</span></td>
-                <td class="py-2.5 px-3">3-Page 300 DPI Scanned Image, AUD currency, 100 txns, 100% reconciled</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <!-- Architecture Overview Grid -->
-      <div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
-        <div class="bg-white rounded-xl border border-slate-200 p-4 shadow-xs space-y-2">
-          <div class="font-bold text-slate-900 text-sm">1. Ingestion &amp; OpenCV + Tesseract OCR</div>
-          <p class="text-slate-600 leading-relaxed">
-            <code>PDFDetector</code> inspects per-page character density and embedded images via <code>pdfplumber</code> &amp; <code>pypdf</code>. Image-based pages are rasterized at 300 DPI using <code>pypdfium2</code>, deskewed via minimum-area bounding boxes in OpenCV, enhanced with CLAHE + Otsu binarization, and parsed with <code>pytesseract</code> (`--psm 6`).
-          </p>
-        </div>
-        <div class="bg-white rounded-xl border border-slate-200 p-4 shadow-xs space-y-2">
-          <div class="font-bold text-slate-900 text-sm">2. Extraction &amp; Balance Reconciliation</div>
-          <p class="text-slate-600 leading-relaxed">
-            <code>StatementExtractor</code> handles both structured grid tables and borderless OCR text lines across Indian &amp; global banks. <code>CleanerAndValidator</code> normalizes dates, corrects OCR <code>O-&gt;0</code> typos, auto-corrects swapped Debit/Credit polarity using running balance deltas, and flags duplicates &amp; reversals.
-          </p>
-        </div>
-        <div class="bg-white rounded-xl border border-slate-200 p-4 shadow-xs space-y-2">
-          <div class="font-bold text-slate-900 text-sm">3. Non-LLM Hybrid Classification Engine</div>
-          <p class="text-slate-600 leading-relaxed">
-            <code>HeuristicRuleClassifier</code> applies 23 priority-weighted regex &amp; merchant rules across 14 categories. <code>TraditionalMLClassifier</code> computes sublinear TF-IDF over word (1,2)-grams &amp; character 4-grams and ensembles Multinomial Naive Bayes with L2 Softmax Logistic Regression.
-          </p>
-        </div>
-      </div>
-    </section>
 
   </main>
 
@@ -1224,7 +1122,7 @@
     function switchTab(target) {
       if (!target) return;
       appState.activeTab = target;
-      ["dashboard", "upload", "audit"].forEach(t => {
+      ["dashboard", "upload"].forEach(t => {
         const sec = document.getElementById(`tab-${t}`);
         if (sec) {
           if (t === target) sec.classList.remove("hidden");
