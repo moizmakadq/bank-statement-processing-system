@@ -80,7 +80,11 @@ class StatementExtractor:
         r"|(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2}(?:st|nd|rd|th)?,?\s+\d{2,4})"
     )
 
-    DATE_START_RE = re.compile(rf"^\s*(?:(?:S\.?\s*No\.?|TXN|TRX|\d{{1,5}})[.)\s\t|-]+)?({DATE_TOKEN_PATTERN})\b", re.IGNORECASE)
+    DATE_START_RE = re.compile(
+        rf"^\s*(?:(?:S\.?\s*No\.?|TXN|TRX|CHQ|REF|[A-Za-z0-9#\-_]{{1,16}})[.)\s\t|/:-]+)?"
+        rf"({DATE_TOKEN_PATTERN})\b",
+        re.IGNORECASE
+    )
     SECOND_DATE_RE = re.compile(rf"^\s*({DATE_TOKEN_PATTERN})\b", re.IGNORECASE)
 
     # Monetary amount token supporting Indian, US, and European (1.234,56) formats + multi-currency symbols
@@ -406,35 +410,62 @@ class StatementExtractor:
             header_idx = -1
             col_map: Dict[str, int] = {}
 
-            for r_idx, row in enumerate(table[:10]):
+            def _map_cells(cell_list: List[str]) -> Dict[str, int]:
+                m: Dict[str, int] = {}
+                for c_idx, cell_text in enumerate(cell_list):
+                    if not cell_text:
+                        continue
+                    if ("value" in cell_text and "date" in cell_text) or cell_text in ("val date", "value date"):
+                        m["value_date"] = c_idx
+                    elif any(k in cell_text for k in ("date", "datum", "buchung", "txn dt", "trans date", "posting date")) and "date" not in m:
+                        m["date"] = c_idx
+                    elif any(k in cell_text for k in ("description", "narration", "particulars", "remarks", "details", "transaction", "verwendungszweck", "libellé", "concepto", "memo")):
+                        if "description" not in m:
+                            m["description"] = c_idx
+                    elif any(k in cell_text for k in ("chq", "cheque", "ref", "utr", "reference", "instrument", "trans id", "check")):
+                        m["ref"] = c_idx
+                    elif cell_text in ("type", "dr/cr", "cr/dr") or "cr/dr" in cell_text or "dr/cr" in cell_text:
+                        m["type"] = c_idx
+                    elif any(k in cell_text for k in ("debit", "withdrawal", "withdrawals", "paid out", "belastung", "débit")) or re.search(r"\bdr\b", cell_text):
+                        m["debit"] = c_idx
+                    elif any(k in cell_text for k in ("credit", "deposit", "deposits", "paid in", "gutschrift", "crédit")) or re.search(r"\bcr\b", cell_text):
+                        m["credit"] = c_idx
+                    elif any(k in cell_text for k in ("balance", "closing", "saldo", "solde")):
+                        m["balance"] = c_idx
+                    elif any(k in cell_text for k in ("amount", "betrag", "montant")) and "amount" not in m:
+                        m["amount"] = c_idx
+                return m
+
+            for r_idx in range(min(10, len(table))):
+                row = table[r_idx]
                 cells = [re.sub(r"\s+", " ", (c or "")).strip().lower() for c in row]
-                joined = " | ".join(cells)
-                if any(k in joined for k in ("date", "datum", "buchung", "txn dt", "trans date", "posting date")) and (
-                    any(k in joined for k in ("description", "narration", "particulars", "remarks", "details", "transaction", "verwendungszweck", "libellé", "concepto", "memo"))
-                ):
+                mapping_single = _map_cells(cells)
+
+                if "date" in mapping_single and "description" in mapping_single:
+                    has_amt_or_bal = any(k in mapping_single for k in ("debit", "credit", "amount", "balance"))
+                    # If this single row is already a full header, use it directly
+                    if has_amt_or_bal:
+                        header_idx = r_idx
+                        col_map = mapping_single
+                        break
+
+                    # Check if next row is a valid second-tier sub-header (not a data row)
+                    if r_idx + 1 < len(table):
+                        next_row = table[r_idx + 1]
+                        first_cell = (next_row[0] or "").strip()
+                        # If first cell is not a transaction date or number
+                        if not re.search(r"\d", first_cell):
+                            next_cells = [re.sub(r"\s+", " ", (c or "")).strip().lower() for c in next_row]
+                            combined_cells = [f"{c} {next_cells[ci] if ci < len(next_cells) else ''}".strip() for ci, c in enumerate(cells)]
+                            mapping_combined = _map_cells(combined_cells)
+                            if any(k in mapping_combined for k in ("debit", "credit", "amount", "balance")):
+                                header_idx = r_idx + 1
+                                col_map = mapping_combined
+                                break
+
+                    # Otherwise, accept single-tier header
                     header_idx = r_idx
-                    for c_idx, cell_text in enumerate(cells):
-                        if not cell_text:
-                            continue
-                        if ("value" in cell_text and "date" in cell_text) or cell_text in ("val date", "value date"):
-                            col_map["value_date"] = c_idx
-                        elif any(k in cell_text for k in ("date", "datum", "buchung", "txn dt", "trans date")) and "date" not in col_map:
-                            col_map["date"] = c_idx
-                        elif any(k in cell_text for k in ("description", "narration", "particulars", "remarks", "details", "transaction", "verwendungszweck", "libellé", "concepto", "memo")):
-                            if "description" not in col_map:
-                                col_map["description"] = c_idx
-                        elif any(k in cell_text for k in ("chq", "cheque", "ref", "utr", "reference", "instrument", "trans id", "check")):
-                            col_map["ref"] = c_idx
-                        elif cell_text in ("type", "dr/cr", "cr/dr") or "cr/dr" in cell_text or "dr/cr" in cell_text:
-                            col_map["type"] = c_idx
-                        elif any(k in cell_text for k in ("debit", "withdrawal", "withdrawals", "paid out", "belastung", "débit")) or re.search(r"\bdr\b", cell_text):
-                            col_map["debit"] = c_idx
-                        elif any(k in cell_text for k in ("credit", "deposit", "deposits", "paid in", "gutschrift", "crédit")) or re.search(r"\bcr\b", cell_text):
-                            col_map["credit"] = c_idx
-                        elif any(k in cell_text for k in ("balance", "closing", "saldo", "solde")):
-                            col_map["balance"] = c_idx
-                        elif any(k in cell_text for k in ("amount", "betrag", "montant")) and "amount" not in col_map:
-                            col_map["amount"] = c_idx
+                    col_map = mapping_single
                     break
 
             if header_idx == -1 or "date" not in col_map or "description" not in col_map:
@@ -591,6 +622,14 @@ class StatementExtractor:
                 if not desc_part:
                     desc_part = "Transaction"
 
+                # Check if desc_part starts with a second date (Value Date)
+                val_date_m = re.match(rf"^\s*({self.DATE_TOKEN_PATTERN})\b\s*(.*)$", desc_part, re.IGNORECASE)
+                if val_date_m:
+                    vd_cand = self.normalize_date(val_date_m.group(1).strip(), prefer_mdy=prefer_mdy)
+                    if vd_cand:
+                        val_date = vd_cand
+                        desc_part = val_date_m.group(2).strip()
+
                 parsed_tail: List[Tuple[float, Optional[str], str]] = []
                 for m in tail_matches:
                     raw_tok = m.group(0)
@@ -611,50 +650,61 @@ class StatementExtractor:
                     b_v, _, _ = parsed_tail[-1]
                     bal_val = b_v
 
-                    if running_prev_bal is not None and bal_val is not None:
-                        delta = round(bal_val - running_prev_bal, 2)
-                        if abs(delta - abs(t1_amt)) <= 1.0 and abs(t2_amt) == 0:
-                            credit_val = abs(t1_amt)
-                            debit_val = abs(t2_amt)
-                        elif abs(delta + abs(t1_amt)) <= 1.0 and abs(t2_amt) == 0:
-                            debit_val = abs(t1_amt)
-                            credit_val = abs(t2_amt)
-                        elif abs(delta - abs(t2_amt)) <= 1.0:
-                            credit_val = abs(t2_amt)
-                            debit_val = abs(t1_amt)
-                        elif abs(delta + abs(t2_amt)) <= 1.0:
-                            debit_val = abs(t2_amt)
-                            credit_val = abs(t1_amt)
-                        else:
-                            debit_val = abs(t1_amt)
-                            credit_val = abs(t2_amt)
-                    else:
+                    if t1_amt > 0 and t2_amt == 0:
                         debit_val = abs(t1_amt)
+                        credit_val = 0.0
+                    elif t1_amt == 0 and t2_amt > 0:
                         credit_val = abs(t2_amt)
+                        debit_val = 0.0
+                    elif t1_drcr == "CR" or t2_drcr == "CR":
+                        credit_val = abs(t2_amt if t2_drcr == "CR" else t1_amt)
+                        debit_val = 0.0
+                    elif t1_drcr == "DR" or t2_drcr == "DR":
+                        debit_val = abs(t1_amt if t1_drcr == "DR" else t2_amt)
+                        credit_val = 0.0
+                    elif running_prev_bal is not None and bal_val is not None:
+                        delta = round(bal_val - running_prev_bal, 2)
+                        if delta > 0:
+                            credit_val = abs(t2_amt if abs(delta - abs(t2_amt)) <= 1.0 else t1_amt)
+                            debit_val = 0.0
+                        elif delta < 0:
+                            debit_val = abs(t1_amt if abs(delta + abs(t1_amt)) <= 1.0 else t2_amt)
+                            credit_val = 0.0
+                        else:
+                            if re.search(r"\b(?:CR|CREDIT|SALARY|DEPOSIT|REFUND|DIVIDEND|INTEREST|INWARD)\b", desc_part, re.IGNORECASE):
+                                credit_val = abs(t2_amt or t1_amt)
+                                debit_val = 0.0
+                            else:
+                                debit_val = abs(t1_amt or t2_amt)
+                                credit_val = 0.0
+                    else:
+                        if re.search(r"\b(?:CR|CREDIT|SALARY|DEPOSIT|REFUND|DIVIDEND|INTEREST|INWARD)\b", desc_part, re.IGNORECASE):
+                            credit_val = abs(t2_amt or t1_amt)
+                            debit_val = 0.0
+                        else:
+                            debit_val = abs(t1_amt or t2_amt)
+                            credit_val = 0.0
                 elif len(parsed_tail) == 2:
                     txn_amt, txn_drcr, _ = parsed_tail[0]
                     bal_val, _, _ = parsed_tail[1]
 
-                    if txn_drcr == "CR":
+                    if txn_drcr == "CR" or re.search(r"\b(?:CR|CREDIT|SALARY|DEPOSIT|REFUND|DIVIDEND|INTEREST|INWARD|NEFT[-\s/]*CR|IMPS[-\s/]*CR)\b", desc_part, re.IGNORECASE):
                         credit_val = abs(txn_amt)
-                    elif txn_drcr == "DR" or txn_amt < 0:
+                        debit_val = 0.0
+                    elif txn_drcr == "DR" or txn_amt < 0 or re.search(r"\b(?:DR|DEBIT|PURCHASE|UPI|PAYMENT|WITHDRAWAL|ATM|POS|CHARGES|TAX)\b", desc_part, re.IGNORECASE):
                         debit_val = abs(txn_amt)
+                        credit_val = 0.0
                     elif running_prev_bal is not None and bal_val is not None:
                         delta = round(bal_val - running_prev_bal, 2)
-                        if abs(delta - abs(txn_amt)) <= 1.0:
+                        if delta > 0:
                             credit_val = abs(txn_amt)
-                        elif abs(delta + abs(txn_amt)) <= 1.0:
-                            debit_val = abs(txn_amt)
+                            debit_val = 0.0
                         else:
-                            if re.search(r"\b(?:CR|CREDIT|SALARY|DEPOSIT|REFUND|DIVIDEND|INTEREST|INWARD|NEFT[-\s/]*CR|IMPS[-\s/]*CR)\b", desc_part, re.IGNORECASE):
-                                credit_val = abs(txn_amt)
-                            else:
-                                debit_val = abs(txn_amt)
+                            debit_val = abs(txn_amt)
+                            credit_val = 0.0
                     else:
-                        if re.search(r"\b(?:CR|CREDIT|SALARY|DEPOSIT|REFUND|DIVIDEND|INTEREST|INWARD|NEFT[-\s/]*CR|IMPS[-\s/]*CR)\b", desc_part, re.IGNORECASE):
-                            credit_val = abs(txn_amt)
-                        else:
-                            debit_val = abs(txn_amt)
+                        debit_val = abs(txn_amt)
+                        credit_val = 0.0
                 elif len(parsed_tail) == 1:
                     txn_amt, txn_drcr, _ = parsed_tail[0]
                     if txn_drcr == "CR":
@@ -740,22 +790,23 @@ class StatementExtractor:
             logger.info("Extracted %d total transactions from image %s", len(all_transactions), pdf_path)
             return pdf_type, metadata, all_transactions, inspections, warnings
 
-        # Single-pass extraction: cache layout text & tables per page with error isolation
-        cached_pages: List[Tuple[str, List[List[List[Optional[str]]]]]] = []
+        # Single-pass extraction: cache normal text, layout text & tables per page with error isolation
+        cached_pages: List[Tuple[str, str, List[List[List[Optional[str]]]]]] = []
         with pdfplumber.open(pdf_path, password=password or None) as pdf:
             for idx, page in enumerate(pdf.pages, start=1):
                 p_info = inspections[idx - 1]
                 try:
                     if p_info.page_type == PDFType.TEXT_BASED:
-                        page_text = page.extract_text(layout=True) or page.extract_text() or ""
+                        page_text_layout = page.extract_text(layout=True) or ""
+                        page_text_norm = page.extract_text() or ""
                         tables = page.extract_tables() or []
-                        full_text_chunks.append(page_text)
-                        cached_pages.append((page_text, tables))
+                        full_text_chunks.append(page_text_layout or page_text_norm)
+                        cached_pages.append((page_text_norm, page_text_layout, tables))
                     else:
                         ocr_res = self.ocr_engine.ocr_page(pdf_path, idx)
                         p_info.ocr_confidence = ocr_res.confidence
                         full_text_chunks.append(ocr_res.text)
-                        cached_pages.append((ocr_res.text, []))
+                        cached_pages.append((ocr_res.text, ocr_res.text, []))
                         if abs(ocr_res.skew_angle_deg) > 0.1:
                             msg = f"Page {idx}: Deskewed scanned image by {ocr_res.skew_angle_deg}° (OCR confidence: {ocr_res.confidence:.1f}%)."
                             warnings.append(msg)
@@ -766,7 +817,7 @@ class StatementExtractor:
                     warnings.append(err_msg)
                     p_info.error = str(page_exc)
                     full_text_chunks.append("")
-                    cached_pages.append(("", []))
+                    cached_pages.append(("", "", []))
 
         combined_text = "\n".join(full_text_chunks)
         metadata = self.extract_metadata(combined_text)
@@ -774,22 +825,38 @@ class StatementExtractor:
 
         # Parse transactions from memory-cached pages (zero redundant PDF file I/O)
         running_bal = metadata.opening_balance
-        for idx, (p_text, tables) in enumerate(cached_pages, start=1):
+        for idx, (p_text_norm, p_text_layout, tables) in enumerate(cached_pages, start=1):
             p_info = inspections[idx - 1]
             page_txns: List[TransactionRecord] = []
             try:
                 if p_info.page_type == PDFType.TEXT_BASED and not p_info.error:
+                    candidates: List[List[TransactionRecord]] = []
                     if tables:
-                        page_txns = self._parse_structured_tables(
+                        table_txns = self._parse_structured_tables(
                             tables, page_num=idx, prefer_mdy=prefer_mdy, initial_opening_balance=running_bal
                         )
-                    if not page_txns:
-                        raw_lines = p_text.splitlines()
-                        page_txns = self.parse_lines_fallback(
-                            raw_lines, page_num=idx, initial_opening_balance=running_bal, prefer_mdy=prefer_mdy
+                        if table_txns:
+                            candidates.append(table_txns)
+                    if p_text_layout:
+                        layout_txns = self.parse_lines_fallback(
+                            p_text_layout.splitlines(), page_num=idx, initial_opening_balance=running_bal, prefer_mdy=prefer_mdy
+                        )
+                        if layout_txns:
+                            candidates.append(layout_txns)
+                    if p_text_norm:
+                        norm_txns = self.parse_lines_fallback(
+                            p_text_norm.splitlines(), page_num=idx, initial_opening_balance=running_bal, prefer_mdy=prefer_mdy
+                        )
+                        if norm_txns:
+                            candidates.append(norm_txns)
+
+                    if candidates:
+                        page_txns = max(
+                            candidates,
+                            key=lambda cand: (sum(1 for t in cand if (t.debit > 0 or t.credit > 0)), len(cand))
                         )
                 else:
-                    ocr_lines = p_text.splitlines()
+                    ocr_lines = (p_text_norm or p_text_layout).splitlines()
                     page_txns = self.parse_lines_fallback(
                         ocr_lines, page_num=idx, initial_opening_balance=running_bal, prefer_mdy=prefer_mdy
                     )
