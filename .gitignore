@@ -44,3 +44,6 @@ Desktop.ini
 
 # VS Code AI rules
 .github/instructions/codacy.instructions.md
+
+.OCR_TEST/
+.sample_data/
