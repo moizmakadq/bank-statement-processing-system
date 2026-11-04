@@ -14,10 +14,10 @@ logger = logging.getLogger(__name__)
 class PDFDetector:
     """Detects PDF structure, encryption, and per-page text vs image characteristics."""
 
-    MIN_CHARS_FOR_TEXT_PAGE = 60
-    MIN_WORDS_FOR_TEXT_PAGE = 10
+    MIN_CHARS_FOR_TEXT_PAGE = 25
+    MIN_WORDS_FOR_TEXT_PAGE = 3
 
-    def __init__(self, min_chars: int = 60, min_words: int = 10):
+    def __init__(self, min_chars: int = 25, min_words: int = 3):
         self.min_chars = min_chars
         self.min_words = min_words
 
@@ -94,12 +94,15 @@ class PDFDetector:
                         )
                     )
 
-                    if char_count >= self.min_chars and word_count >= self.min_words:
+                    if char_count >= self.min_chars or word_count >= self.min_words:
                         p_type = PDFType.TEXT_BASED
                         text_pages += 1
-                    else:
+                    elif image_count > 0:
                         p_type = PDFType.IMAGE_BASED
                         image_pages += 1
+                    else:
+                        p_type = PDFType.TEXT_BASED
+                        text_pages += 1
 
                     page_inspections.append(
                         PageInspection(
